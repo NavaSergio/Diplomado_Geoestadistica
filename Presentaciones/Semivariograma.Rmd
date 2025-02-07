@@ -1,0 +1,572 @@
+---
+title: "Variograma"
+author: "Sergio Nava"
+date: "24/3/2023"
+fontsize: 10pt
+output:
+  beamer_presentation:
+    keep_tex: TRUE
+    theme: "AnnArbor"
+    colortheme: "dolphin"
+    fonttheme: "structurebold"
+    slide_level: 2
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(fig.path = "imagenes/")
+```
+
+
+# Introducción al Semivariograma
+
+- El **semivariograma** es una herramienta fundamental en **geoestadística** para medir la dependencia espacial de un conjunto de datos.
+- Fue inicialmente utilizado para predecir la presencia de yacimientos de oro y petróleo en Sudáfrica.
+- La primera ley de la geografía, formulada por **Waldo Tobler** en 1970, establece que “todas las cosas están relacionadas entre sí, pero las cosas más próximas en el espacio tienen una relación mayor que las distantes“.
+- Se utiliza para describir cómo varía la similitud entre puntos en función de la distancia que los separa.
+- Su análisis es esencial para la interpolación mediante Kriging y otros métodos espaciales.
+
+---
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.6\textwidth]{./imagenes/figura1.png}
+    \caption{Ejemplo de un semivariograma empírico y su ajuste.}
+\end{figure}
+
+
+
+
+# Diferencia entre Variograma y Semivariograma
+
+- **Variograma:** Representa la varianza de las diferencias entre puntos separados por una distancia específica. Se calcula como:
+  
+  \begin{equation}
+  2\gamma(h) = 	\text{Var}[Z(s_i) - Z(s_i + h)]
+  \end{equation}
+
+- **Semivariograma:** Es la mitad del variograma y se usa con mayor frecuencia en geoestadística debido a su estabilidad matemática:
+  
+  \begin{equation}
+  \gamma(h) = \frac{1}{2} 	\text{Var}[Z(s_i) - Z(s_i + h)]
+  \end{equation}
+
+- El semivariograma es más comúnmente utilizado en aplicaciones prácticas ya que facilita el modelado y la interpolación espacial.
+
+
+
+# Parámetros Clave del Semivariograma
+
+
+\begin{itemize} \footnotesize 
+   \item \textbf{Pepita o Nugget } $C_0$: Representa una discontinuidad puntual del semivariograma en el origen. Puede deberse a errores de medición o a la escala de la variable observada. 
+   \item \textbf{Meseta, Umbral o Sill} $C_1$: Es la varianza de los datos. Se denota por $C_0$  o por $C_0 + C_1$ cuando la pepita es diferente de cero. Si el ruido espacial domina sobre la correlación, las predicciones pueden ser poco precisas.
+   \item \textbf{Rango o Range} : Es la distancia hasta la cual existe correlación entre los datos. Un rango pequeño sugiere independencia espacial entre los puntos, mientras que un rango más grande indica una estructura espacial más fuerte. 
+\end{itemize}
+
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.5\textwidth]{./imagenes/figura1.png}
+    \caption{Ilustración de los parámetros clave del semivariograma.}
+\end{figure}
+
+---
+
+```{r, echo=FALSE, fig.width=3, fig.height=2.5, warning=FALSE, message=FALSE, fig.cap="Visualización de los parámetros clave del semivariograma. Se ilustran el umbral (línea roja discontinua), que representa la varianza total del proceso; el rango (línea verde discontinua), que indica la distancia a la que el semivariograma alcanza el umbral; y el efecto pepita (punto negro), que refleja la variabilidad no explicada a escala muy pequeña."}
+library(ggplot2)
+
+# Crear datos del semivariograma teórico
+h <- seq(0, 10, length.out = 100)
+umbral <- 1.5
+rango <- 6
+efecto_pepita <- 0.3
+gamma <- efecto_pepita + (umbral - efecto_pepita) * (1.5 * (h / rango) - 0.5 * (h / rango)^3)
+gamma[h > rango] <- umbral
+
+# Crear el gráfico
+semivariograma_plot <- ggplot(data.frame(h, gamma), aes(x = h, y = gamma)) +
+  geom_line(size = 1, color = "blue") +
+  geom_hline(yintercept = umbral, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = rango, linetype = "dashed", color = "green") +
+  geom_point(aes(x = 0, y = efecto_pepita), color = "black", size = 3) +
+  annotate("text", x = rango + 0.5, y = umbral - 0.05, label = paste("Umbral:", umbral), color = "red", hjust = 0) +
+  annotate("text", x = rango, y = 0.1, label = paste("Rango:", rango), color = "green", vjust = -0.5) +
+  annotate("text", x = 0, y = efecto_pepita + 0.1, label = paste("Efecto Pepita:", efecto_pepita), color = "black", hjust = -0.2) +
+  labs(title = "Parámetros del Semivariograma", x = "Distancia h", y = expression("Semivarianza"~gamma(h))) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray") +
+  theme_classic()
+
+print(semivariograma_plot)
+```
+
+
+# Variograma Cloud
+
+- El **variograma cloud** es una herramienta exploratoria en geoestadística que permite visualizar la dispersión de los valores del semivariograma para cada par de puntos.
+- En lugar de promediar los valores de semivarianza por intervalos de distancia, muestra cada punto individualmente, lo que ayuda a detectar anomalías o patrones en los datos espaciales.
+- Se utiliza para evaluar la presencia de valores atípicos y verificar la estructura de dependencia espacial en los datos.
+
+
+```{r, echo=FALSE,fig.height=3, warning=FALSE, message=FALSE, fig.cap="Ejemplo de Variograma Cloud"}
+library(gstat)
+library(sp)
+library(ggplot2)
+
+# Simulación de datos espaciales
+set.seed(123)
+n <- 100
+x <- runif(n, 0, 10)
+y <- runif(n, 0, 10)
+z <- rnorm(n, mean = 50, sd = 10)
+
+data <- data.frame(x, y, z)
+coordinates(data) <- ~x+y
+
+# Calcular el variograma cloud
+vg_cloud <- variogram(z ~ 1, data, cloud = TRUE)
+
+# Graficar el variograma cloud
+p_cloud <- ggplot(vg_cloud, aes(x = dist, y = gamma)) +
+  geom_point(alpha = 0.5, color = "blue") +
+  labs(title = "Variograma Cloud", x = "Distancia", y = "Semivarianza") +
+  theme_minimal()
+
+print(p_cloud)
+```
+
+
+# Relación entre el Semivariograma y la Correlación
+
+- La **función de correlación** describe la similitud entre valores de una variable en diferentes ubicaciones espaciales.
+- Existe una relación matemática entre el semivariograma y la función de correlación:
+  
+  \begin{equation}
+  \rho(h) = 1 - \frac{\gamma(h)}{\gamma(\infty)}
+  \end{equation}
+  
+  donde:
+  - \( \rho(h) \) es la función de correlación.
+  - \( \gamma(h) \) es el semivariograma.
+  - \( \gamma(\infty) \) es el umbral del semivariograma.
+- A medida que la distancia \( h \) aumenta, la correlación decrece y el semivariograma se estabiliza en su umbral.
+- En un proceso espacial estacionario, la correlación decrece con la distancia de manera similar al crecimiento del semivariograma.
+
+
+# Definición del Semivariograma
+
+El semivariograma se define matemáticamente como:
+
+\begin{equation}
+\gamma(h) = \frac{1}{2N(h)} \sum_{i=1}^{N(h)} [Z(s_i) - Z(s_i + h)]^2
+\end{equation}
+
+Donde:
+
+- \( \gamma(h) \) es la semivarianza para una distancia \( h \).
+- \( N(h) \) es el número de pares de puntos separados por la distancia \( h \).
+- \( Z(s_i) \) es el valor de la variable en la ubicación \( s_i \).
+
+# Tipos de Semivariogramas
+
+## Semivariograma Empírico
+- Se calcula a partir de datos observados.
+- Representa la variabilidad espacial en diferentes escalas.
+
+## Semivariograma Teórico
+- Se modela mediante funciones matemáticas.
+- Modelos más comunes:
+
+
+```{r, echo=FALSE,warning=FALSE,fig.width=5, fig.height=2, fig.cap="Ejemplo de diferentes modelos teóricos de semivariograma."}
+library(gstat)
+library(sp)
+library(ggplot2)
+
+# Definir modelos de semivariograma
+h <- seq(0, 10, length.out = 100)
+
+# Funciones para cada modelo
+spherical_model <- ifelse(h < 5, 1.5 * (h / 5) - 0.5 * (h / 5)^3, 1)
+circular_model <- ifelse(h < 5, 1 - sqrt(1 - (h / 5)^2), 1)
+exponential_model <- 1 - exp(-h / 5)
+linear_model <- pmin(h / 5, 1)  # Asegurar que no sobrepase el umbral
+gaussian_model <- 1 - exp(-(h / 5)^2)
+
+# Crear un data frame para graficar
+variogram_models <- data.frame(
+  h = rep(h, 5),
+  gamma = c(spherical_model, circular_model, exponential_model, linear_model, gaussian_model),
+  Modelo = rep(c("Esférico", "Circular", "Exponencial", "Lineal", "Gaussiano"), each = 100)
+)
+
+# Graficar los modelos
+p <- ggplot(variogram_models, aes(x = h, y = gamma, color = Modelo)) +
+  geom_line(size = 1) +
+  labs(title = "Modelos Teóricos de Semivariograma", x = "Distancia h", y =  expression(gamma(h))) +
+  theme_minimal()
+
+print(p)
+
+```
+
+---
+
+```{r echo=FALSE, fig.align='center', fig.height=10, fig.width=6, message=FALSE, warning=FALSE}
+
+library(gstat)
+library(sp)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+
+# Funciones para modelos de semivariogramas
+semivariogram_exponential <- function(h, a, sigma2) sigma2 * (1 - exp(-h / a))
+semivariogram_gaussian <- function(h, a, sigma2) sigma2 * (1 - exp(-(h / a)^2))
+semivariogram_spherical <- function(h, a, sigma2) ifelse(h <= a, sigma2 * (1.5 * (h / a) - 0.5 * (h / a)^3), sigma2)
+semivariogram_matern <- function(h, a, b, sigma2) sigma2 * (1 - (1 + (h / a)^b) * exp(-(h / a)^b))
+semivariogram_linear <- function(h, b) b * h
+
+# Funciones de correlación correspondientes
+correlation_exponential <- function(h, a) exp(-h / a)
+correlation_gaussian <- function(h, a) exp(-(h / a)^2)
+correlation_spherical <- function(h, a) ifelse(h <= a, 1 - 1.5 * (h / a) + 0.5 * (h / a)^3, 0)
+correlation_matern <- function(h, a, b) exp(-(h / a)^b)
+correlation_linear <- function(h, b) pmax(0, 1 - (h * b))
+
+# Crear data para cada modelo en 2D con lógica específica para "linear"
+create_isotropic_data <- function(model_func, a = NULL, sigma2 = NULL, b = NULL) {
+  grid <- expand.grid(x = seq(-10, 10, length.out = 100), 
+                      y = seq(-10, 10, length.out = 100))
+  grid$h <- sqrt(grid$x^2 + grid$y^2)
+  
+  grid$z <- if (!is.null(a) && !is.null(sigma2) && !is.null(b)) {
+    model_func(grid$h, a, b, sigma2)  # Caso para Matérn
+  } else if (!is.null(a) && !is.null(sigma2)) {
+    model_func(grid$h, a, sigma2)  # Caso para Exponential, Gaussian, Spherical
+  } else if (!is.null(b)) {
+    model_func(grid$h, b)  # Caso para Linear
+  } else {
+    stop("Parámetros incorrectos: especifica solo los necesarios para el modelo.")
+  }
+  
+  return(grid)
+}
+
+# Parámetros comunes
+a <- 5
+sigma2 <- 1
+b <- 0.1
+
+# Generar datos para cada modelo
+exp_data <- create_isotropic_data(semivariogram_exponential, a, sigma2)
+gauss_data <- create_isotropic_data(semivariogram_gaussian, a, sigma2)
+sph_data <- create_isotropic_data(semivariogram_spherical, a, sigma2)
+mat_data <- create_isotropic_data(semivariogram_matern, a, sigma2, b = 3)
+lin_data <- create_isotropic_data(semivariogram_linear, a = NULL, sigma2 = NULL, b = b)
+
+# Crear gráficos para cada modelo con curva y nivel
+plot_model <- function(data, model_func, corr_func, title, a = NULL, sigma2 = NULL, b = NULL) {
+  h <- seq(0, 10, length.out = 100)
+
+  # Determinar la función correcta basada en los parámetros
+  if (!is.null(a) && !is.null(sigma2) && !is.null(b)) {
+    curve_data <- data.frame(
+      h = h, 
+      gamma = model_func(h, a, b, sigma2),
+      correlation = corr_func(h, a, b)
+    )
+  } else if (!is.null(a) && !is.null(sigma2)) {
+    curve_data <- data.frame(
+      h = h, 
+      gamma = model_func(h, a, sigma2),
+      correlation = corr_func(h, a)
+    )
+  } else if (!is.null(b)) {
+    curve_data <- data.frame(
+      h = h, 
+      gamma = model_func(h, b),
+      correlation = corr_func(h, b)
+    )
+  } else {
+    stop("Parámetros incorrectos: especifica solo los necesarios para el modelo.")
+  }
+
+  # Crear la gráfica de la curva del modelo y la función de correlación
+  p_curve <- ggplot(curve_data, aes(x = h)) +
+    geom_line(aes(y = gamma, color = "Semivariograma"), size = 1) +
+    geom_line(aes(y = correlation, color = "Correlación"), size = 1, linetype = "dashed") +
+    scale_color_manual(values = c("Semivariograma" = "blue", "Correlación" = "red")) +
+    labs(title = title, x = "Lag h", y = "Valor") +
+    theme_minimal() +
+    theme(legend.title = element_blank())
+
+  # Crear la gráfica de las curvas de nivel
+  p_contour <- ggplot(data, aes(x = x, y = y, z = z)) +
+    geom_contour_filled() +
+    labs(title = paste(title, "- Contour"), x = "Eje X", y = "Eje Y") +
+    theme_minimal()
+
+  return(list(p_curve, p_contour))
+}
+
+# Crear gráficos individuales
+plots <- c(
+  plot_model(exp_data, semivariogram_exponential, correlation_exponential, "Exponential", a = a, sigma2 = sigma2),
+  plot_model(gauss_data, semivariogram_gaussian, correlation_gaussian, "Gaussian", a = a, sigma2 = sigma2),
+  plot_model(sph_data, semivariogram_spherical, correlation_spherical, "Spherical", a = a, sigma2 = sigma2),
+  plot_model(mat_data, semivariogram_matern, correlation_matern, "Matern", a = a, sigma2 = sigma2, b = 3),
+  plot_model(lin_data, semivariogram_linear, correlation_linear, "Linear", b = b)
+)
+
+# Usar grid.arrange para organizar en 5 filas y 2 columnas
+grid.arrange(grobs = plots, ncol = 2, nrow = 5)
+
+```
+
+# Procesos Estacionarios y No Estacionarios
+
+- **Estacionarios:** La media y la varianza son constantes a través del espacio.
+- **No estacionarios:** Presentan tendencias o patrones en los datos espaciales.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.6\textwidth]{./imagenes/figura3.jpg}
+    \caption{Ejemplo de procesos estacionarios y no estacionarios.}
+\end{figure}
+
+---
+
+- **Estacionarios:** La media y la varianza son constantes a través del espacio.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.6\textwidth]{./imagenes/figura3a.png}
+    \caption{Ejemplo de un proceso estacionario.}
+\end{figure}
+
+---
+
+- **No estacionarios:** Presentan tendencias o patrones en los datos espaciales.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.6\textwidth]{./imagenes/figura3b.png}
+    \caption{Ejemplo de un proceso no estacionario.}
+\end{figure}
+
+
+# Análisis estructural espacial
+
+- Determinar la estructura de relación entre los datos mediante el semivariograma.
+- Si el semivariograma varía en diferentes direcciones, indica **anisotropía**.
+- Si solo depende de la distancia, se considera **isotrópico**.
+
+---
+
+```{r anisotropia, echo=FALSE, fig.align='center', fig.height=4, fig.cap="Visualización comparativa de isotropía y anisotropía en datos espaciales. La figura muestra cómo la variabilidad se distribuye de manera uniforme en todas las direcciones en un proceso isotrópico, mientras que en un proceso anisotrópico la variabilidad es distinta según la dirección, evidenciando mayor dependencia espacial en un eje específico."}
+library(ggplot2)
+library(reshape2)
+
+# Crear un grid de coordenadas
+x <- seq(-10, 10, length.out = 100)
+y <- seq(-10, 10, length.out = 100)
+grid <- expand.grid(X = x, Y = y)
+
+# Generar datos para isotropía (variación uniforme en todas las direcciones)
+grid$Z_iso <- exp(-0.1 * (grid$X^2 + grid$Y^2))
+
+# Generar datos para anisotropía (variabilidad diferente según la dirección)
+grid$Z_aniso <- exp(-0.1 * (grid$X^2 + 0.05 * grid$Y^2))
+
+# Convertir datos a formato largo para ggplot2
+grid_long <- melt(grid, id.vars = c("X", "Y"))
+
+# Crear la figura con ggplot2
+ggplot(grid_long, aes(x = X, y = Y, fill = value)) +
+  geom_raster() +
+  scale_fill_viridis_c() +
+  facet_wrap(~variable, labeller = as_labeller(c(Z_iso = "Isotropía", Z_aniso = "Anisotropía"))) +
+  labs(title = "Comparación entre Isotropía y Anisotropía", x = "X", y = "Y") +
+  theme_minimal()
+```
+
+---
+
+### Anisotropía
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, fig.height=4, fig.align='center', fig.cap="Comparación de semivariogramas empíricos en distintas direcciones para detectar anisotropía en los datos espaciales. A la izquierda, se muestran los puntos muestreados con las direcciones de análisis. A la derecha, los semivariogramas estimados en 0°, 45°, 90° y 135° revelan variaciones en la estructura espacial, evidenciando la presencia de anisotropía si los patrones difieren entre direcciones."}
+library(gstat)
+library(sp)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+
+# Simulación de datos espaciales con anisotropía marcada
+set.seed(123)
+n <- 100
+x <- runif(n, 0, 10)
+y <- runif(n, 0, 10)
+
+# Transformación para introducir anisotropía
+theta <- pi / 4  # 45 grados de anisotropía
+x_aniso <- x * cos(theta) + y * sin(theta)
+y_aniso <- -x * sin(theta) + (y * cos(theta) / 2)
+
+z <- x_aniso + rnorm(n, sd = 0.5)
+
+data <- data.frame(x = x, y = y, z = z)
+coordinates(data) <- ~x+y
+
+# Calcular semivariogramas en diferentes direcciones
+vg_0 <- as.data.frame(variogram(z ~ x+y, data, alpha = 0))  # 0°
+vg_45 <- as.data.frame(variogram(z ~ x+y, data, alpha = 45)) # 45°
+vg_90 <- as.data.frame(variogram(z ~ x+y, data, alpha = 90)) # 90°
+vg_135 <- as.data.frame(variogram(z ~ x+y, data, alpha = 135)) # 135°
+
+# Unir los variogramas en un solo data frame con nombres correctos
+variograms <- variogram(z~1, data, alpha=c(0,45,90,135)) %>% 
+   rename(Distancia = dist, Semivarianza = gamma, Direction=dir.hor) %>% 
+   select(Distancia,Semivarianza, Direction) %>% 
+   mutate(Direction = paste0(Direction, "°"))
+
+# Asegurar que la columna Direction sea un factor
+variograms$Direction <- factor(variograms$Direction, levels = c("0°", "45°", "90°", "135°"))
+
+# Definir colores manualmente para asegurar consistencia
+colores_direcciones <- c("0°" = "red", "45°" = "blue", "90°" = "green", "135°" = "purple")
+
+# Graficar puntos muestreados con ggplot
+p1 <- ggplot(as.data.frame(data), aes(x = x, y = y)) +  # Convertir a data.frame explícitamente
+  geom_point(color = "black") +
+  geom_segment(aes(x = 5, y = 5, xend = 8, yend = 5), color = "red", arrow = arrow()) +
+  geom_segment(aes(x = 5, y = 5, xend = 6.5, yend = 6.5), color = "blue", arrow = arrow()) +
+  geom_segment(aes(x = 5, y = 5, xend = 5, yend = 8), color = "green", arrow = arrow()) +
+  geom_segment(aes(x = 5, y = 5, xend = 3.5, yend = 6.5), color = "purple", arrow = arrow()) +
+  labs(title = "Puntos Muestreados con Direcciones", x = "X", y = "Y") +
+  theme_minimal()
+
+# Graficar semivariogramas estimados con ggplot
+p2 <- ggplot(variograms, aes(x = Distancia, y = Semivarianza, color = Direction)) +
+  geom_line(size = 1) +
+  scale_color_manual(values = colores_direcciones) +  # Asignar colores manualmente
+  labs(title = "Semivariogramas Empíricos en Diferentes Direcciones", x = "Distancia", y = "Semivarianza") +
+  theme_minimal()
+
+
+# Mostrar gráficos en una misma figura
+grid.arrange(p1, p2, ncol = 2)
+```
+
+---
+
+
+### Isotropía
+
+\begin{itemize} \footnotesize
+    \item En un proceso \textbf{isotrópico}, la variabilidad espacial es la misma en todas las direcciones.
+    \item Se espera que los semivariogramas calculados en distintas direcciones sean similares.
+    \item En la siguiente figura se muestra la comparación de semivariogramas empíricos en diferentes direcciones para un proceso isotrópico.
+\end{itemize}
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, fig.height=3.5, fig.align='center', fig.cap="Comparación de semivariogramas empíricos en distintas direcciones para evaluar isotropía en los datos espaciales. A la izquierda, se muestran los puntos muestreados con las direcciones de análisis. A la derecha, los semivariogramas estimados en 0°, 45°, 90° y 135° presentan patrones similares en todas las direcciones, lo que indica que la variabilidad espacial es independiente de la orientación."}
+library(gstat)
+library(sp)
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+
+# Simulación de datos espaciales isotrópicos
+set.seed(123)
+n <- 100
+x <- runif(n, 0, 10)
+y <- runif(n, 0, 10)
+z <- rnorm(n, sd = 1)  # Variabilidad uniforme en todas las direcciones
+
+data <- data.frame(x = x, y = y, z = z)
+coordinates(data) <- ~x+y
+
+# Calcular semivariogramas en diferentes direcciones
+vg_0 <- as.data.frame(variogram(z ~ 1, data, alpha = 0))  # 0°
+vg_45 <- as.data.frame(variogram(z ~ 1, data, alpha = 45)) # 45°
+vg_90 <- as.data.frame(variogram(z ~ 1, data, alpha = 90)) # 90°
+vg_135 <- as.data.frame(variogram(z ~ 1, data, alpha = 135)) # 135°
+
+# Unir los variogramas en un solo data frame con nombres correctos
+variograms <- variogram(z~1, data, alpha=c(0,45,90,135)) %>% 
+   rename(Distancia = dist, Semivarianza = gamma, Direction=dir.hor) %>% 
+   select(Distancia,Semivarianza, Direction) %>% 
+   mutate(Direction = paste0(Direction, "°"))
+
+
+# Asegurar que la columna Direction sea un factor
+variograms$Direction <- factor(variograms$Direction, levels = c("0°", "45°", "90°", "135°"))
+
+# Definir colores manualmente para asegurar consistencia
+colores_direcciones <- c("0°" = "red", "45°" = "blue", "90°" = "green", "135°" = "purple")
+
+# Graficar puntos muestreados con ggplot
+p1 <- ggplot(as.data.frame(data), aes(x = x, y = y)) +  # Convertir a data.frame explícitamente
+  geom_point(color = "black") +
+  geom_segment(aes(x = 5, y = 5, xend = 8, yend = 5), color = "red", arrow = arrow()) +
+  geom_segment(aes(x = 5, y = 5, xend = 6.5, yend = 6.5), color = "blue", arrow = arrow()) +
+  geom_segment(aes(x = 5, y = 5, xend = 5, yend = 8), color = "green", arrow = arrow()) +
+  geom_segment(aes(x = 5, y = 5, xend = 3.5, yend = 6.5), color = "purple", arrow = arrow()) +
+  labs(title = "Puntos Muestreados con Direcciones", x = "X", y = "Y") +
+  theme_minimal()
+
+# Graficar semivariogramas estimados con ggplot
+p2 <- ggplot(variograms, aes(x = Distancia, y = Semivarianza, color = Direction)) +
+  geom_line(size = 1)  +
+  scale_color_manual(values = colores_direcciones) +  # Asignar colores manualmente
+  labs(title = "Semivariogramas Empíricos en Diferentes Direcciones", x = "Distancia", y = "Semivarianza") +
+  theme_minimal()
+
+
+# Mostrar gráficos en una misma figura
+grid.arrange(p1, p2, ncol = 2)
+```
+
+
+---
+
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.6\textwidth]{./imagenes/variograma-dir1.jpg}
+    \caption{Cálculo del variograma en dirección $\theta$.}
+\end{figure}
+
+
+# Gráfica del Semivariograma en R
+
+```{r Semivariograma_en_R, echo=FALSE,warning=FALSE, message=FALSE}
+library(gstat)
+library(sp)
+
+# Generar datos espaciales simulados
+set.seed(123)
+x <- runif(100, 0, 10)
+y <- runif(100, 0, 10)
+z <- rnorm(100, mean = 50, sd = 10)
+
+data <- data.frame(x, y, z)
+coordinates(data) <- ~x+y
+
+# Calcular el semivariograma
+vg <- variogram(z ~ 1, data)
+
+# Ajustar modelo teórico
+model <- fit.variogram(vg, model = vgm(1, "Sph", 3, 1))
+
+# Graficar el semivariograma
+plot(vg, model = model, main = "Semivariograma Empírico y Ajustado")
+```
+
+# Conclusión
+
+- El semivariograma es una herramienta clave en **geoestadística**.
+- Permite caracterizar la estructura espacial de los datos y mejorar los modelos de predicción mediante **Kriging**.
+- Su correcta implementación mejora la precisión de los análisis espaciales y sus aplicaciones prácticas en diversos campos como la geología, ecología y salud pública.
